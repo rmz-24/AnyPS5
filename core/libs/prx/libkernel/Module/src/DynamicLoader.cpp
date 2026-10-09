@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -169,6 +170,20 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
         Error("dlsym: symbol not found in supported module scope");
         return nullptr;
     } catch (const std::exception& error) { Error(error.what()); return nullptr; }
+}
+std::int32_t OpenHostLibrary_nid_no_patch(const char* path) {
+    auto module = std::make_shared<Module>();
+#ifdef _WIN32
+    module->native = LoadLibraryExW(std::filesystem::path(path).c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!module->native) throw std::runtime_error(std::string("cannot load system library ") + path + ": Windows loader error " + std::to_string(GetLastError()));
+#else
+    module->native = ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!module->native) throw std::runtime_error(std::string("cannot load system library ") + path + ": " + ::dlerror());
+#endif
+    std::lock_guard lock(modulesMutex);
+    const auto handle = nextHandle++;
+    modules.emplace(handle, std::move(module));
+    return static_cast<std::int32_t>(handle);
 }
 int APS5_VABI dlclose_nid_postfix(void* handle) {
     std::shared_ptr<Module> module;

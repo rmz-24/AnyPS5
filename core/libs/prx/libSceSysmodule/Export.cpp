@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -9,6 +10,7 @@
 #include <windows.h>
 #include <psapi.h>
 #else
+#include <dlfcn.h>
 #include <fstream>
 #endif
 
@@ -25,6 +27,31 @@ const char* findModuleName(const std::uint32_t id) {
 
 std::mutex gMutex;
 std::unordered_map<std::uint32_t, std::int32_t> gLoadCount;
+std::unordered_map<std::uint32_t, std::int32_t> gHandles;
+constexpr int kSysmoduleInvalidId = static_cast<int>(0x805A1000);
+constexpr int kSysmoduleNotLoaded = static_cast<int>(0x805A1001);
+
+std::filesystem::path SystemLibraryPath(const char* name) {
+#ifdef _WIN32
+    HMODULE self = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&SystemLibraryPath), &self)) {
+        throw std::runtime_error("cannot locate libSceSysmodule");
+    }
+    wchar_t file[MAX_PATH] = {};
+    const auto length = GetModuleFileNameW(self, file, MAX_PATH);
+    if (length == 0 || length == MAX_PATH) {
+        throw std::runtime_error("cannot locate libSceSysmodule");
+    }
+    const std::filesystem::path own(file);
+#else
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<void*>(&SystemLibraryPath), &info) || info.dli_fname == nullptr) {
+        throw std::runtime_error("cannot locate libSceSysmodule");
+    }
+    const std::filesystem::path own(info.dli_fname);
+#endif
+    return own.parent_path() / (std::string(name) + ".prx");
+}
 
 bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
 #ifdef _WIN32
@@ -89,6 +116,8 @@ bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
 }
 
 }
+
+extern "C" std::int32_t OpenHostLibrary_nid_no_patch(const char* path);
 
 extern "C" {
 
@@ -191,6 +220,27 @@ int APS5_VABI sceSysmoduleUnloadModuleInternal(std::uint32_t id) {
         return 0x80A90003;
     }
     it->second--;
+    return 0;
+}
+
+int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t* handle) {
+    const char* name = (id & 0x7fffffffu) == 0 ? nullptr : findModuleName(id);
+    if (!name) {
+        return kSysmoduleInvalidId;
+    }
+    std::lock_guard<std::mutex> lock(gMutex);
+    auto loaded = gLoadCount.find(id);
+    if (loaded == gLoadCount.end() || loaded->second < 1) {
+        return kSysmoduleNotLoaded;
+    }
+    if (!handle) {
+        return 0;
+    }
+    auto opened = gHandles.find(id);
+    if (opened == gHandles.end()) {
+        opened = gHandles.emplace(id, OpenHostLibrary_nid_no_patch(SystemLibraryPath(name).string().c_str())).first;
+    }
+    *handle = opened->second;
     return 0;
 }
 

@@ -1,11 +1,14 @@
 add_library(libSceSysmodule SHARED EXCLUDE_FROM_ALL Export.cpp)
 target_include_directories(libSceSysmodule PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(libSceSysmodule PRIVATE libkernel)
 configure_windows_unwind(libSceSysmodule)
 
 if(BUILD_TESTING)
     add_test_executable(guest_sysmodule_tests ${LIBS_INCLUDE_DIR}/tests/GuestSysmodule.cpp)
     target_include_directories(guest_sysmodule_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(guest_sysmodule_tests PRIVATE libSceSysmodule)
+    target_link_libraries(guest_sysmodule_tests PRIVATE libSceSysmodule libkernel libc)
+    configure_windows_unwind(guest_sysmodule_tests)
+    add_dependencies(guest_sysmodule_tests libSceKeyboard)
     add_test(NAME guest_sysmodule COMMAND guest_sysmodule_tests)
     if(WIN32)
         set_tests_properties(guest_sysmodule PROPERTIES ENVIRONMENT_MODIFICATION
