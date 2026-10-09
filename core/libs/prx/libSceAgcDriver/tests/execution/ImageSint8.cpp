@@ -119,6 +119,9 @@ void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, s
         {0, 0, 0, 128}
     };
     request.useCache = false;
+    auto withoutMesh = request;
+    withoutMesh.target.spirvVersion = 0x00010300u;
+    static_cast<void>(ShaderRecompiler::Recompile(withoutMesh));
     const auto result = ShaderRecompiler::Recompile(request);
     device.Dispatch(result, groups, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
     device.WaitIdle();
